@@ -24,7 +24,7 @@ Copyright (c) 2015-2016 Xiaowei Zhu, Tsinghua University
 template <class T>
 inline bool cas(T * ptr, T old_val, T new_val) {
   if (sizeof(T) == 8) {
-    return __sync_bool_compare_and_swap((long*)ptr, *((long*)&old_val), *((long*)&new_val));
+    return __sync_bool_compare_and_swap((long*)ptr, *((long*)&old_val), *((long*)&new_val)); // 比较*ptr与oldval的值，如果两者相等，则将newval更新到*ptr并返回true
   } else if (sizeof(T) == 4) {
     return __sync_bool_compare_and_swap((int*)ptr, *((int*)&old_val), *((int*)&new_val));
   } else {

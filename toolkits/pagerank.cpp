@@ -27,7 +27,7 @@ void compute(Graph<Empty> * graph, int iterations) {
   double exec_time = 0;
   exec_time -= get_time();
 
-  double * curr = graph->alloc_vertex_array<double>();
+  double * curr = graph->alloc_vertex_array<double>(); // 默认数组大小都是vertices
   double * next = graph->alloc_vertex_array<double>();
   VertexSubset * active = graph->alloc_vertex_subset();
   active->fill();

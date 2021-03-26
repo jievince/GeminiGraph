@@ -32,7 +32,7 @@ void compute(Graph<Empty> * graph, VertexId root) {
   visited->set_bit(root);
   active_in->clear();
   active_in->set_bit(root);
-  graph->fill_vertex_array(parent, graph->vertices);
+  graph->fill_vertex_array(parent, graph->vertices);// vid范围:[0, vertices-1], 将每个点的parent初始化为vertices, 表示还没找到parent
   parent[root] = root;
 
   VertexId active_vertices = 1;
@@ -43,21 +43,21 @@ void compute(Graph<Empty> * graph, VertexId root) {
     }
     active_out->clear();
     active_vertices = graph->process_edges<VertexId,VertexId>(
-      [&](VertexId src){
+      [&](VertexId src){ // sparse_signal
         graph->emit(src, src);
       },
-      [&](VertexId src, VertexId msg, VertexAdjList<Empty> outgoing_adj){
+      [&](VertexId src, VertexId msg, VertexAdjList<Empty> outgoing_adj){ // sparse_slot
         VertexId activated = 0;
         for (AdjUnit<Empty> * ptr=outgoing_adj.begin;ptr!=outgoing_adj.end;ptr++) {
           VertexId dst = ptr->neighbour;
-          if (parent[dst]==graph->vertices && cas(&parent[dst], graph->vertices, src)) {
+          if (parent[dst]==graph->vertices && cas(&parent[dst], graph->vertices, src)) { // dst还没被访问过， 它的parent点还没更新过
             active_out->set_bit(dst);
             activated += 1;
           }
         }
         return activated;
       },
-      [&](VertexId dst, VertexAdjList<Empty> incoming_adj) {
+      [&](VertexId dst, VertexAdjList<Empty> incoming_adj) { // dense_signal
         if (visited->get_bit(dst)) return;
         for (AdjUnit<Empty> * ptr=incoming_adj.begin;ptr!=incoming_adj.end;ptr++) {
           VertexId src = ptr->neighbour;
@@ -67,14 +67,14 @@ void compute(Graph<Empty> * graph, VertexId root) {
           }
         }
       },
-      [&](VertexId dst, VertexId msg) {
+      [&](VertexId dst, VertexId msg) { // dense_slot
         if (cas(&parent[dst], graph->vertices, msg)) {
           active_out->set_bit(dst);
           return 1;
         }
         return 0;
       },
-      active_in, visited
+      active_in, visited // activs, dense_selective
     );
     active_vertices = graph->process_vertices<VertexId>(
       [&](VertexId vtx) {

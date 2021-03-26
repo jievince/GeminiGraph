@@ -27,3 +27,15 @@
 *.exe
 *.out
 *.app
+
+bc
+bfs
+cc
+pagerank
+sssp
+
+# deps
+deps/
+
+# vscode
+.vscode/

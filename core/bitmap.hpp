@@ -17,8 +17,8 @@ Copyright (c) 2015-2016 Xiaowei Zhu, Tsinghua University
 #ifndef BITMAP_HPP
 #define BITMAP_HPP
 
-#define WORD_OFFSET(i) ((i) >> 6)
-#define BIT_OFFSET(i) ((i) & 0x3f)
+#define WORD_OFFSET(i) ((i) >> 6) // 取余
+#define BIT_OFFSET(i) ((i) & 0x3f) // 取模
 
 class Bitmap {
 public:
