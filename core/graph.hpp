@@ -347,7 +347,7 @@ public:
   }
 
   // load a directed graph and make it undirected
-  // outgoing_adj_bitmap, outgoing_adj_index(size) --> outgoing_adj_index, compressed_outgoing_adj_index --> compressed_outgoing_adj_list
+  // (outgoing_adj_bitmap, outgoing_adj_index(size)-> outgoing_adj_index, compressed_outgoing_adj_index) ==> compressed_outgoing_adj_list
   void load_undirected_from_directed(std::string path, VertexId vertices) {
     double prep_time = 0;
     prep_time -= MPI_Wtime();
@@ -755,7 +755,7 @@ public:
     delete [] recv_buffer;
     close(fin);
 
-    tune_chunks();
+    tune_chunks(); // 因为是无向边，incoming_xxx和outgoing_xxx一样，所以不需要transpose()
     tuned_chunks_sparse = tuned_chunks_dense;
 
     prep_time += MPI_Wtime();
@@ -980,7 +980,7 @@ public:
             int dst_part = get_local_partition_id(dst);
             if (!outgoing_adj_bitmap[dst_part]->get_bit(src)) {
               outgoing_adj_bitmap[dst_part]->set_bit(src);
-              outgoing_adj_index[dst_part][src] = 0;
+              outgoing_adj_index[dst_part][src] = 0; // outgoing_adj_size
             }
             __sync_fetch_and_add(&outgoing_adj_index[dst_part][src], 1); // 从src指出的出边
             __sync_fetch_and_add(&in_degree[dst], 1);
@@ -1069,7 +1069,8 @@ public:
 
 
     {
-      // 必须读第一遍， 第一遍读用来构造outgoing_adj_index， 第二遍读的时候根据outgoing_adj_index来将边数据存储到对应的位置上
+      // 必须读第一遍， 第一遍读用来构造outgoing_adj_index(size)， 第二遍读的时候根据outgoing_adj_index来将边数据存储到对应的位置上
+      // (outgoing_adj_index(size),outgoing_adj_bitmap -> outgoing_adj_index, compressed_adj_index, compressed_adj_verteices) ===> (outgoing_adj_list)
       std::thread recv_thread_dst([&](){
         int finished_count = 0;
         MPI_Status recv_status;
@@ -1166,7 +1167,7 @@ public:
       incoming_adj_index[s_i] = (EdgeId*)numa_alloc_onnode(sizeof(EdgeId) * (vertices+1), s_i);
     }
     {
-      std::thread recv_thread_src([&](){
+      std::thread recv_thread_src([&](){  // 只有load_directed才需要recv_thread_src(和dst一样，也是读两边)
         int finished_count = 0;
         MPI_Status recv_status;
         while (finished_count < partitions) {
@@ -1188,7 +1189,7 @@ public:
           for (EdgeId e_i=0;e_i<recv_edges;e_i++) {
             VertexId src = recv_buffer[e_i].src;
             VertexId dst = recv_buffer[e_i].dst;
-            assert(src >= partition_offset[partition_id] && src < partition_offset[partition_id+1]);
+            assert(src >= partition_offset[partition_id] && src < partition_offset[partition_id+1]); // [master src]->[mirror dst] (dense, pull mode)
             int src_part = get_local_partition_id(src);
             if (!incoming_adj_bitmap[src_part]->get_bit(dst)) {
               incoming_adj_bitmap[src_part]->set_bit(dst);
@@ -1247,7 +1248,7 @@ public:
       incoming_edges[s_i] = 0;
       compressed_incoming_adj_vertices[s_i] = 0;
       for (VertexId v_i=0;v_i<vertices;v_i++) {
-        if (incoming_adj_bitmap[s_i]->get_bit(v_i)) {
+        if (incoming_adj_bitmap[s_i]->get_bit(v_i)) { // v_i是 mirror dst
           incoming_edges[s_i] += incoming_adj_index[s_i][v_i];
           compressed_incoming_adj_vertices[s_i] += 1;
         }
@@ -1256,11 +1257,11 @@ public:
       compressed_incoming_adj_index[s_i][0].index = 0;
       EdgeId last_e_i = 0;
       compressed_incoming_adj_vertices[s_i] = 0;
-      for (VertexId v_i=0;v_i<vertices;v_i++) {
+      for (VertexId v_i=0;v_i<vertices;v_i++) { // v_i是mirror dst
         if (incoming_adj_bitmap[s_i]->get_bit(v_i)) {
           incoming_adj_index[s_i][v_i] = last_e_i + incoming_adj_index[s_i][v_i];
           last_e_i = incoming_adj_index[s_i][v_i];
-          compressed_incoming_adj_index[s_i][compressed_incoming_adj_vertices[s_i]].vertex = v_i;
+          compressed_incoming_adj_index[s_i][compressed_incoming_adj_vertices[s_i]].vertex = v_i; // [mirror dst]在compressed_incoming_adj_index中递增
           compressed_incoming_adj_vertices[s_i] += 1;
           compressed_incoming_adj_index[s_i][compressed_incoming_adj_vertices[s_i]].index = last_e_i;
         }
@@ -1360,7 +1361,7 @@ public:
     delete [] recv_buffer;
     close(fin);
 
-    transpose();
+    transpose(); // !!! 这里 transepose了， 那在tune_chunks()中，incoming_xxx其实就是outgoing_xxx
     tune_chunks();
     transpose();
     tune_chunks();
@@ -1374,6 +1375,7 @@ public:
     #endif
   }
 
+  // outgoing等数据结构里都是站在master点角度：比如ougoing_adj_index[master dst][mirror src],对于mirrors src来说是出边； incoming_adj_index[master src][mirror dst]， 对于mirror dst来说是入边
   void tune_chunks() { // 调整chunk密度
     tuned_chunks_dense = new ThreadState * [partitions];
     int current_send_part_id = partition_id;
@@ -1393,8 +1395,8 @@ public:
           VertexId p_v_i = 0;
           // 找到当前partition_id负责的点集的start的下标（不是实际的vid值)
           while (p_v_i<compressed_incoming_adj_vertices[s_i]) { // 是[mirror a]->[master b]的反向边，也就是[master b]->[mirror a] [master src]->[mirror dst]
-            VertexId v_i = compressed_incoming_adj_index[s_i][p_v_i].vertex; // v_i是按照[0, vertices)的顺序递增的
-            if (v_i >= partition_offset[i]) {
+            VertexId v_i = compressed_incoming_adj_index[s_i][p_v_i].vertex; // v_i是mirror dst, v_i是按照[0, vertices)的顺序递增的
+            if (v_i >= partition_offset[i]) {  // [mirror src]为啥要和master点比较 // 难道是在统计[mirror src]也属于当前partition管理的情况？
               break;
             }
             p_v_i++;
