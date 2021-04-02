@@ -21,17 +21,17 @@ Copyright (c) 2014-2015 Xiaowei Zhu, Tsinghua University
 
 typedef float Weight;
 
-void compute(Graph<Weight> * graph, VertexId root) {
+void compute(Graph<Weight> * graph, VertexId root) { // root 到其他所有点的最短路径
   double exec_time = 0;
   exec_time -= get_time();
 
   Weight * distance = graph->alloc_vertex_array<Weight>();
   VertexSubset * active_in = graph->alloc_vertex_subset();
-  VertexSubset * active_out = graph->alloc_vertex_subset();
+  VertexSubset * active_out = graph->alloc_vertex_subset(); // active_out不需要同步？那每个进程看到的active_out都不相同(但是active_out设置的都是master点的状态)
   active_in->clear();
   active_in->set_bit(root);
   graph->fill_vertex_array(distance, (Weight)1e9);
-  distance[root] = (Weight)0;
+  distance[root] = (Weight)0; // root 到 root的距离为0
   VertexId active_vertices = 1;
   
   for (int i_i=0;active_vertices>0;i_i++) {
@@ -44,10 +44,12 @@ void compute(Graph<Weight> * graph, VertexId root) {
         graph->emit(src, distance[src]);
       },
       [&](VertexId src, Weight msg, VertexAdjList<Weight> outgoing_adj){
+        printf("sparse\n");
         VertexId activated = 0;
         for (AdjUnit<Weight> * ptr=outgoing_adj.begin;ptr!=outgoing_adj.end;ptr++) {
           VertexId dst = ptr->neighbour;
           Weight relax_dist = msg + ptr->edge_data;
+          printf("sparse mode: [%u], %f, %f, %f\n", src, msg, ptr->edge_data, relax_dist);
           if (relax_dist < distance[dst]) {
             if (write_min(&distance[dst], relax_dist)) {
               active_out->set_bit(dst);
@@ -59,10 +61,12 @@ void compute(Graph<Weight> * graph, VertexId root) {
       },
       [&](VertexId dst, VertexAdjList<Weight> incoming_adj) {
         Weight msg = 1e9;
+        printf("dense\n");
         for (AdjUnit<Weight> * ptr=incoming_adj.begin;ptr!=incoming_adj.end;ptr++) {
           VertexId src = ptr->neighbour;
           // if (active_in->get_bit(src)) {
             Weight relax_dist = distance[src] + ptr->edge_data;
+            printf("dense mode: [%u], %f, %f\n", dst, ptr->edge_data, relax_dist);
             if (relax_dist < msg) {
               msg = relax_dist;
             }
@@ -92,6 +96,7 @@ void compute(Graph<Weight> * graph, VertexId root) {
   if (graph->partition_id==0) {
     VertexId max_v_i = root;
     for (VertexId v_i=0;v_i<graph->vertices;v_i++) {
+      printf("distance[%u]=%f\n\n", v_i, distance[v_i]);
       if (distance[v_i] < 1e9 && distance[v_i] > distance[max_v_i]) {
         max_v_i = v_i;
       }

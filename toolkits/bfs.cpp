@@ -23,10 +23,10 @@ void compute(Graph<Empty> * graph, VertexId root) {
   double exec_time = 0;
   exec_time -= get_time();
 
-  VertexId * parent = graph->alloc_vertex_array<VertexId>();
+  VertexId * parent = graph->alloc_vertex_array<VertexId>(); // 表示从parent节点访问到这个点的
   VertexSubset * visited = graph->alloc_vertex_subset();
-  VertexSubset * active_in = graph->alloc_vertex_subset();
-  VertexSubset * active_out = graph->alloc_vertex_subset();
+  VertexSubset * active_in = graph->alloc_vertex_subset(); // active_in是当前循环的bitmap, active_out是下次循环的bitmap
+  VertexSubset * active_out = graph->alloc_vertex_subset(); // active和visited表达的意思是相同的吗
 
   visited->clear();
   visited->set_bit(root);
@@ -37,39 +37,42 @@ void compute(Graph<Empty> * graph, VertexId root) {
 
   VertexId active_vertices = 1;
 
+  // src是否访问过，可以通过查看active_in, 也就是上轮循环的active_out(dst). dst是否访问过，不能查看active_in,需要查看visited, 也就是上轮循环的active_out
   for (int i_i=0;active_vertices>0;i_i++) {
     if (graph->partition_id==0) {
       printf("active(%d)>=%u\n", i_i, active_vertices);
     }
     active_out->clear();
-    active_vertices = graph->process_edges<VertexId,VertexId>(
-      [&](VertexId src){ // sparse_signal
-        graph->emit(src, src);
+    // sparse mode: [active src]->[master dst]
+    active_vertices = graph->process_edges<VertexId,VertexId>( 
+      [&](VertexId src) { // sparse_signal // master src
+        graph->emit(src, src); // msg是src, src是src->dst的parent // 都从src出发了， src已经是活跃的了
       },
-      [&](VertexId src, VertexId msg, VertexAdjList<Empty> outgoing_adj){ // sparse_slot
-        VertexId activated = 0;
+      [&](VertexId src, VertexId msg, VertexAdjList<Empty> outgoing_adj){ // sparse_slot // mirror src
+        VertexId activated = 0; // 注意， 发送来的src肯定是not visited, 不需要像在dense_signal里那样check一下
         for (AdjUnit<Empty> * ptr=outgoing_adj.begin;ptr!=outgoing_adj.end;ptr++) {
           VertexId dst = ptr->neighbour;
           if (parent[dst]==graph->vertices && cas(&parent[dst], graph->vertices, src)) { // dst还没被访问过， 它的parent点还没更新过
-            active_out->set_bit(dst);
+            active_out->set_bit(dst); // 为什么不在这里更新visited
             activated += 1;
           }
         }
         return activated;
       },
-      [&](VertexId dst, VertexAdjList<Empty> incoming_adj) { // dense_signal
+      // dense mode: [not_visited dst]<-[active master src]
+      [&](VertexId dst, VertexAdjList<Empty> incoming_adj) { // dense_signal // dst是mirror, src->dst
         if (visited->get_bit(dst)) return;
         for (AdjUnit<Empty> * ptr=incoming_adj.begin;ptr!=incoming_adj.end;ptr++) {
           VertexId src = ptr->neighbour;
-          if (active_in->get_bit(src)) {
-            graph->emit(dst, src);
+          if (active_in->get_bit(src)) { // 只统计active的点和出边
+            graph->emit(dst, src); // msg是src, src是src->dst的parent
             break;
           }
         }
       },
       [&](VertexId dst, VertexId msg) { // dense_slot
         if (cas(&parent[dst], graph->vertices, msg)) {
-          active_out->set_bit(dst);
+          active_out->set_bit(dst); // active_in, active_out是bfs算法里的入边和出边，和graph.hpp里的无关
           return 1;
         }
         return 0;
@@ -83,7 +86,7 @@ void compute(Graph<Empty> * graph, VertexId root) {
       },
       active_out
     );
-    std::swap(active_in, active_out);
+    std::swap(active_in, active_out); // 在下一轮循环中， visited和active_in相同
   }
 
   exec_time += get_time();

@@ -51,24 +51,24 @@ void compute(Graph<Empty> * graph, int iterations) {
     graph->fill_vertex_array(next, (double)0);
     graph->process_edges<int,double>(
       [&](VertexId src){
-        graph->emit(src, curr[src]);
+        graph->emit(src, curr[src]); // [master src] send msg(curr[src]) to [mirror src]
       },
-      [&](VertexId src, double msg, VertexAdjList<Empty> outgoing_adj){
+      [&](VertexId src, double msg, VertexAdjList<Empty> outgoing_adj){ // [主动方：mirror src]->[master dst]
         for (AdjUnit<Empty> * ptr=outgoing_adj.begin;ptr!=outgoing_adj.end;ptr++) {
           VertexId dst = ptr->neighbour;
           write_add(&next[dst], msg);
         }
         return 0;
       },
-      [&](VertexId dst, VertexAdjList<Empty> incoming_adj) {
+      [&](VertexId dst, VertexAdjList<Empty> incoming_adj) { // [master src]->[mirror dst：主动方] 
         double sum = 0;
         for (AdjUnit<Empty> * ptr=incoming_adj.begin;ptr!=incoming_adj.end;ptr++) {
-          VertexId src = ptr->neighbour;
+          VertexId src = ptr->neighbour; // [master src]
           sum += curr[src];
         }
-        graph->emit(dst, sum);
+        graph->emit(dst, sum); // [mirror dst] send msg(sum) to [master dst]
       },
-      [&](VertexId dst, double msg) {
+      [&](VertexId dst, double msg) { // [master dst] recv msg(sum)
         write_add(&next[dst], msg);
         return 0;
       },
@@ -88,14 +88,14 @@ void compute(Graph<Empty> * graph, int iterations) {
           next[vtx] = 1 - d + d * next[vtx];
           if (graph->out_degree[vtx]>0) {
             next[vtx] /= graph->out_degree[vtx];
-            return fabs(next[vtx] - curr[vtx]) * graph->out_degree[vtx];
+            return fabs(next[vtx] - curr[vtx]) * graph->out_degree[vtx]; // 两次迭代的pr[v_i]的差值
           }
           return fabs(next[vtx] - curr[vtx]);
         },
         active
       );
     }
-    delta /= graph->vertices;
+    delta /= graph->vertices; // pr差值的平均
     std::swap(curr, next);
   }
 
@@ -114,8 +114,8 @@ void compute(Graph<Empty> * graph, int iterations) {
     printf("pr_sum=%lf\n", pr_sum);
   }
 
-  graph->gather_vertex_array(curr, 0);
-  if (graph->partition_id==0) {
+  graph->gather_vertex_array(curr, 0); // root part 收集全图所有点的pr值
+  if (graph->partition_id==0) { // root part
     VertexId max_v_i = 0;
     for (VertexId v_i=0;v_i<graph->vertices;v_i++) {
       if (curr[v_i] > curr[max_v_i]) max_v_i = v_i;
