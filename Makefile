@@ -3,7 +3,7 @@ TARGETS= toolkits/bc toolkits/bfs toolkits/cc toolkits/pagerank toolkits/sssp
 MACROS= 
 # MACROS= -D PRINT_DEBUG_MESSAGES
 
-MPICXX= mpicxx
+MPICXX= /home/jie.wang/plato/3rd/mpich/bin/mpicxx
 CXXFLAGS= -O0 -Wall -std=c++11 -g -fopenmp -march=native -I$(ROOT_DIR) $(MACROS)
 SYSLIBS= -lnuma
 HEADERS= $(shell find . -name '*.hpp')
